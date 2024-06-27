@@ -1,0 +1,117 @@
+###Import data
+#"Qiime_Manifest1.tsv" is my manifest containing my fastq.gz file locations
+mkdir jv-data
+
+qiime tools import \
+  --type 'SampleData[PairedEndSequencesWithQuality]' \
+  --input-path Qiime_Manifest1.tsv \
+  --input-format PairedEndFastqManifestPhred33V2 \
+  --output-path ./jv-data/demux-paired-end.qza
+
+qiime demux summarize \
+--i-data ./jv-data/demux-paired-end.qza \
+--o-visualization ./jv-data/demux-paired-end.qzv
+
+# qiime tools view ./jv-data/demux-paired-end.qzv
+
+###Remove Primers
+mkdir jv-data-deprimered
+
+qiime cutadapt trim-paired \
+--i-demultiplexed-sequences ./jv-data/demux-paired-end.qza \
+--p-front-f AGATATTGGAACWTTATATTTTATTTTTGG \
+--p-front-r WACTAATCAATTWCCAAATCCTCC \
+--o-trimmed-sequences ./jv-data-deprimered/demux-paired-end-deprimered.qza
+
+#now lets create a .qzv summary file to see what to cut off for the denoising step
+qiime demux summarize \
+--i-data ./jv-data-deprimered/demux-paired-end-deprimered.qza \
+--o-visualization ./jv-data-deprimered/demux-paired-end-deprimered.qzv
+
+# qiime tools view ./jv-data-deprimered/demux-paired-end-deprimered.qzv
+
+###Denoise
+mkdir jv-data-denoised
+
+qiime dada2 denoise-paired \
+--i-demultiplexed-seqs  ./jv-data-deprimered/demux-paired-end-deprimered.qza \
+--p-trunc-len-f 100 \
+--p-trunc-len-r 73 \
+--o-representative-sequences ./jv-data-denoised/rep-seqs.qza \
+--o-table ./jv-data-denoised/table.qza \
+--o-denoising-stats ./jv-data-denoised/stats.qza
+
+
+qiime feature-table summarize \
+--i-table ./jv-data-denoised/table.qza \
+--o-visualization ./jv-data-denoised/table.qzv \
+--m-sample-metadata-file Qiime_Metadata1.tsv
+
+qiime feature-table tabulate-seqs \
+--i-data ./jv-data-denoised/rep-seqs.qza \
+--o-visualization ./jv-data-denoised/rep-seqs.qzv
+
+qiime metadata tabulate \
+--m-input-file ./jv-data-denoised/stats.qza \
+--o-visualization ./jv-data-denoised/denoising-stats.qzv
+
+#view the outputs (optional):
+# qiime tools view ./jv-data-denoised/table.qzv
+# qiime tools view ./jv-data-denoised/rep-seqs.qzv
+# qiime tools view ./jv-data-denoised/denoising-stats.qzv
+
+
+##Now with rarefaction
+#choose sampling depth by viewing table.qzv
+
+# qiime tools view ./jv-data-denoised/table.qzv
+
+#RAREFY TABLE
+qiime feature-table rarefy \
+--i-table ./jv-data-denoised/table.qza \
+--p-sampling-depth 267 \
+--o-rarefied-table ./jv-data-denoised/table-rare.qza 
+
+
+
+###Assign Taxa Classification
+#you can start here if you have "./jv-data-denoised/" already in the directory, also "Qiime_Metadata1.tsv"
+#assign taxonomy ("ncbi-COI-pr-refseqs-classifier.qza" is a classifier that I already had made)
+mkdir jv-data-classified
+
+qiime feature-classifier classify-sklearn \
+--i-classifier ncbi-COI-pr-refseqs-classifier.qza \
+--i-reads ./jv-data-denoised/rep-seqs.qza \
+--o-classification ./jv-data-classified/taxonomy.qza
+
+
+#visualize the results with non-rarefied table
+qiime taxa barplot \
+--i-table ./jv-data-denoised/table.qza \
+--i-taxonomy ./jv-data-classified/taxonomy.qza \
+--m-metadata-file Qiime_Metadata1.tsv \
+--o-visualization ./jv-data-classified/taxonomy-barplot.qzv
+
+# qiime tools view ./jv-data-classified/taxonomy-barplot.qzv
+
+
+#visualize the results with rarefied table
+qiime taxa barplot \
+--i-table ./jv-data-denoised/table-rare.qza  \
+--i-taxonomy ./jv-data-classified/taxonomy.qza \
+--m-metadata-file Qiime_Metadata1.tsv \
+--o-visualization ./jv-data-classified/taxonomy-barplot-rare.qzv
+
+# qiime tools view ./jv-data-classified/taxonomy-barplot-rare.qzv
+
+
+
+###Create Phylogenetic Tree
+mkdir diversity-metrics
+
+qiime phylogeny align-to-tree-mafft-fasttree \
+--i-sequences ./jv-data-denoised/rep-seqs.qza \
+--o-alignment ./diversity-metrics/aligned-seqs.qza \
+--o-masked-alignment ./diversity-metrics/aligned-masked.qza \
+--o-tree ./diversity-metrics/tree-unrooted.qza \
+--o-rooted-tree ./diversity-metrics/tree-rooted.qza
