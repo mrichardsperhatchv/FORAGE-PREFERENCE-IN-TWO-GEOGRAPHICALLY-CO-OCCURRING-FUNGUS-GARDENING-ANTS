@@ -1,0 +1,170 @@
+###Download stuff from NCBI
+#Only do this on weekends or between 9pm and 5am Eastern time
+mkdir ncbi-data
+
+! qiime rescript get-ncbi-data \
+    --p-query 'txid6656[ORGN] AND (cytochrome c oxidase subunit 1[Title] OR cytochrome c oxidase subunit I[Title] OR cytochrome oxidase subunit 1[Title] OR cytochrome oxidase subunit I[Title] OR COX1[Title] OR CO1[Title] OR COI[Title])' \
+    --o-sequences ./ncbi-data/COI-ref-seqs.qza \
+    --o-taxonomy ./ncbi-data/COI-ref-tax.qza \
+    --verbose
+	
+#note that I only downloaded arthropod specific COI data in this case
+
+
+
+###Dereplicate data
+mkdir ncbi-data-dereplicated
+
+! qiime rescript dereplicate \
+    --i-sequences ./ncbi-data/COI-ref-seqs.qza \
+    --i-taxa ./ncbi-data/COI-ref-tax.qza \
+    --p-mode 'super' \
+    --p-threads 8 \
+    --o-dereplicated-sequences ./ncbi-data-dereplicated/COI-ref-seqs-derep.qza \
+    --o-dereplicated-taxa ./ncbi-data-dereplicated/COI-ref-tax-derep.qza
+
+#see what you are left with	
+! qiime feature-table tabulate-seqs \
+  --i-data ./ncbi-data-dereplicated/COI-ref-seqs-derep.qza \
+  --o-visualization ./ncbi-data-dereplicated/COI-ref-seqs-derepCOI-ref-seqs-derep.qzv
+
+# qiime tools view COI-ref-seqs-derep.qzv
+
+
+
+###Generate an initial reference pool of sequence segments using primer-pair search
+mkdir initial-reference-pool
+
+! qiime feature-classifier extract-reads \
+   --i-sequences ./ncbi-data-dereplicated/COI-ref-seqs-derep.qza \
+   --p-f-primer AGATATTGGAACWTTATATTTTATTTTTGG \
+   --p-r-primer WACTAATCAATTWCCAAATCCTCC \
+   --p-n-jobs 40 \
+   --o-reads ./initial-reference-pool/COI-pr-seq-segments.qza
+
+#clean it up
+! qiime rescript dereplicate \
+    --i-sequences ./initial-reference-pool/COI-pr-seq-segments.qza \
+    --i-taxa ./ncbi-data-dereplicated/COI-ref-tax-derep.qza \
+    --p-mode 'super' \
+    --p-threads 8 \
+    --o-dereplicated-sequences ./initial-reference-pool/COI-pr-seq-segments-derep.qza \
+    --o-dereplicated-taxa ./initial-reference-pool/COI-pr-tax-segments-derep.qza
+    
+! qiime rescript cull-seqs \
+    --i-sequences ./initial-reference-pool/COI-pr-seq-segments-derep.qza  \
+    --p-n-jobs 8 \
+    --p-num-degenerates 1 \
+    --p-homopolymer-length 8 \
+    --o-clean-sequences ./initial-reference-pool/COI-pr-seq-segments-derep-cull.qza
+
+! qiime feature-table tabulate-seqs \
+  --i-data ./initial-reference-pool/COI-pr-seq-segments-derep-cull.qza \
+  --o-visualization ./initial-reference-pool/COI-pr-seq-segments-derep-cull.qzv
+
+
+
+###Expanding our reference segment sequence pool
+##First iteration of query sequence segment extraction
+mkdir expanded-reference-pool-01
+
+! qiime rescript extract-seq-segments \
+    --i-input-sequences ./ncbi-data-dereplicated/COI-ref-seqs-derep.qza \
+    --i-reference-segment-sequences ./initial-reference-pool/COI-pr-seq-segments-derep-cull.qza \
+    --p-perc-identity 0.9 \
+    --p-min-seq-len 10 \
+    --p-threads 40 \
+    --o-extracted-sequence-segments ./expanded-reference-pool-01/COI-pr-extracted-seq-segments-01.qza \
+    --o-unmatched-sequences ./expanded-reference-pool-01/COI-pr-unmatched-sequences-01.qza \
+    --verbose
+
+#Filter again
+! qiime rescript dereplicate \
+    --i-sequences ./expanded-reference-pool-01/COI-pr-extracted-seq-segments-01.qza \
+    --i-taxa ./ncbi-data-dereplicated/COI-ref-tax-derep.qza \
+    --p-mode 'super' \
+    --p-threads 8 \
+    --o-dereplicated-sequences ./expanded-reference-pool-01/COI-pr-extracted-seq-segments-derep-01.qza \
+    --o-dereplicated-taxa ./expanded-reference-pool-01/COI-pr-extracted-tax-segments-derep-01.qza
+
+! qiime rescript cull-seqs \
+    --i-sequences ./expanded-reference-pool-01/COI-pr-extracted-seq-segments-derep-01.qza \
+    --p-n-jobs 8 \
+    --p-num-degenerates 1 \
+    --p-homopolymer-length 8 \
+    --o-clean-sequences ./expanded-reference-pool-01/COI-pr-extracted-seq-segments-derep-cull-01.qza
+
+! qiime feature-table tabulate-seqs \
+  --i-data ./expanded-reference-pool-01/COI-pr-extracted-seq-segments-derep-cull-01.qza \
+  --o-visualization ./expanded-reference-pool-01/COI-pr-extracted-seq-segments-derep-cull-01.qzv
+  
+# qiime tools view ./expanded-reference-pool-01/COI-pr-extracted-seq-segments-derep-cull-01.qzv
+#showed a sequence count of 
+
+
+
+##Second iteration
+mkdir expanded-reference-pool-02
+
+! qiime rescript extract-seq-segments \
+    --i-input-sequences ./ncbi-data-dereplicated/COI-ref-seqs-derep.qza \
+    --i-reference-segment-sequences ./expanded-reference-pool-01/COI-pr-extracted-seq-segments-derep-cull-01.qza \
+    --p-perc-identity 0.9 \
+    --p-min-seq-len 10 \
+    --p-threads 40 \
+    --o-extracted-sequence-segments ./expanded-reference-pool-02/COI-pr-extracted-seq-segments-02.qza \
+    --o-unmatched-sequences ./expanded-reference-pool-02/COI-pr-unmatched-sequences-02.qza \
+    --verbose
+
+#Filter again
+! qiime rescript dereplicate \
+    --i-sequences ./expanded-reference-pool-02/COI-pr-extracted-seq-segments-02.qza \
+    --i-taxa ./ncbi-data-dereplicated/COI-ref-tax-derep.qza \
+    --p-mode 'super' \
+    --p-threads 8 \
+    --o-dereplicated-sequences ./expanded-reference-pool-02/COI-pr-extracted-seq-segments-derep-02.qza \
+    --o-dereplicated-taxa ./expanded-reference-pool-02/COI-pr-extracted-tax-segments-derep-02.qza
+
+! qiime rescript cull-seqs \
+    --i-sequences ./expanded-reference-pool-02/COI-pr-extracted-seq-segments-derep-02.qza \
+    --p-n-jobs 8 \
+    --p-num-degenerates 1 \
+    --p-homopolymer-length 8 \
+    --o-clean-sequences ./expanded-reference-pool-02/COI-pr-extracted-seq-segments-derep-cull-02.qza
+
+! qiime feature-table tabulate-seqs \
+  --i-data ./expanded-reference-pool-02/COI-pr-extracted-seq-segments-derep-cull-02.qza \
+  --o-visualization ./expanded-reference-pool-02/COI-pr-extracted-seq-segments-derep-cull-02.qzv
+
+# qiime tools view ./expanded-reference-pool-02/COI-pr-extracted-seq-segments-derep-cull-02.qzv
+
+
+ 
+###One last step before building our classifier
+mkdir final-reference-pool
+cp ./expanded-reference-pool-02/COI-pr-extracted-seq-segments-derep-cull-02.qza final-reference-pool/COI-pr-extracted-seq-segments-derep-cull-final.qza
+
+! qiime rescript filter-taxa \
+    --i-taxonomy ./ncbi-data-dereplicated/COI-ref-tax-derep.qza \
+    --m-ids-to-keep-file ./final-reference-pool/COI-pr-extracted-seq-segments-derep-cull-final.qza \
+    --o-filtered-taxonomy ./final-reference-pool/COI-pr-extracted-tax-segments-derep-cull-final.qza
+
+
+
+###Build and evaluate our classifier
+mkdir classifier-COI-super
+
+! qiime rescript evaluate-fit-classifier \
+    --i-sequences ./final-reference-pool/COI-pr-extracted-seq-segments-derep-cull-final.qza  \
+    --i-taxonomy ./final-reference-pool/COI-pr-extracted-tax-segments-derep-cull-final.qza \
+    --p-n-jobs 2 \
+    --o-classifier ./classifier-COI-super/ncbi-COI-pr-refseqs-classifier.qza \
+    --o-evaluation ./classifier-COI-super/ncbi-COI-pr-refseqs-classifier-evaluation.qzv \
+    --o-observed-taxonomy ./classifier-COI-super/ncbi-COI-pr-refseqs-predicted-taxonomy.qza
+
+! qiime rescript evaluate-taxonomy \
+  --i-taxonomies ./final-reference-pool/COI-pr-extracted-tax-segments-derep-cull-final.qza ./classifier-COI-super/ncbi-COI-pr-refseqs-predicted-taxonomy.qza \
+  --p-labels ref-taxonomy predicted-taxonomy \
+  --o-taxonomy-stats ./classifier-COI-super/COI-pr-ref-taxonomy-evaluation.qzv
+  
+# qiime tools view ./classifier-COI-super/COI-pr-ref-taxonomy-evaluation.qzv
